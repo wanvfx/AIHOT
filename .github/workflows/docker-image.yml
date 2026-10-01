@@ -1,8 +1,14 @@
-# Optional: build & push multi-arch AIHOT images to your own registry.
-# Copy this file to your AIHOT fork at  .github/workflows/docker-image.yml
-# (it must sit at the repo root so context "." = the AIHOT source and ./Dockerfile exists).
-# Then set the "Docker Image" field in the LuCI page to
-#   ghcr.io/<your-github-username>/aihot:latest
+# Build & push multi-arch AIHOT images.
+# Copy to your AIHOT fork at .github/workflows/docker-image.yml (repo root; context "." + ./Dockerfile).
+#
+# Pushes to BOTH:
+#   - ghcr.io/<owner>/aihot    (uses the built-in GITHUB_TOKEN; always works)
+#   - docker.io/<user>/aihot   (Docker Hub; only when secrets are set — this is the one iStoreOS
+#                               "iStore增强/iStoreEnhance" can accelerate, since registry-mirrors
+#                               only cover Docker Hub, not ghcr)
+#
+# Docker Hub requires a repo secret:  DOCKERHUB_TOKEN  (a Hub access token with write)
+# Optional repo variable:             DOCKERHUB_USERNAME  (if your Hub username != GitHub owner)
 name: docker-image
 
 on:
@@ -24,12 +30,47 @@ jobs:
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Log in to GitHub Container Registry
+
+      # Gate Docker Hub on whether its token secret exists, so ghcr still pushes without it.
+      - name: Check Docker Hub creds
+        id: dhc
+        env:
+          DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -n "$DH_TOKEN" ]; then echo "enabled=true" >> "$GITHUB_OUTPUT"; else echo "enabled=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Log in to ghcr.io
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        if: steps.dhc.outputs.enabled == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ vars.DOCKERHUB_USERNAME || github.repository_owner }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Compose tags
+        id: tags
+        run: |
+          owner="${{ github.repository_owner }}"
+          {
+            echo "ghcr.io/$owner/aihot:latest"
+            echo "ghcr.io/$owner/aihot:${{ github.sha }}"
+            if [ "${{ steps.dhc.outputs.enabled }}" = "true" ]; then
+              hub="${{ vars.DOCKERHUB_USERNAME || github.repository_owner }}"
+              echo "docker.io/$hub/aihot:latest"
+              echo "docker.io/$hub/aihot:${{ github.sha }}"
+            fi
+          } > taglist.txt
+          echo "tags<<EOF" >> "$GITHUB_OUTPUT"
+          cat taglist.txt >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -37,8 +78,6 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/aihot:latest
-            ghcr.io/${{ github.repository_owner }}/aihot:${{ github.sha }}
+          tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
