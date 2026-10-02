@@ -15,7 +15,6 @@ name: docker-image
 
 on:
   workflow_dispatch:
-  tags: [ "v*" ]
 
 permissions:
   contents: read
