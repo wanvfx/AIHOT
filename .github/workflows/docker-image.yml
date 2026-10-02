@@ -1,21 +1,21 @@
 # Build & push multi-arch AIHOT images.
 # Copy to your AIHOT fork at .github/workflows/docker-image.yml (repo root; context "." + ./Dockerfile).
 #
-# Pushes to BOTH:
-#   - ghcr.io/<owner>/aihot    (uses the built-in GITHUB_TOKEN; always works)
-#   - docker.io/<user>/aihot   (Docker Hub; only when secrets are set — this is the one iStoreOS
-#                               "iStore增强/iStoreEnhance" can accelerate, since registry-mirrors
-#                               only cover Docker Hub, not ghcr)
+# Manual only: run from Actions -> docker-image -> "Run workflow". It does NOT auto-run on push/sync,
+# so you choose when to cut a version (keeps versions clean and rollbackable).
 #
-# Docker Hub requires a repo secret:  DOCKERHUB_TOKEN  (a Hub access token with write)
-# Optional repo variable:             DOCKERHUB_USERNAME  (if your Hub username != GitHub owner)
+# Each build is pushed to BOTH registries with 3 tags:
+#   latest | the commit sha | a human-readable date tag YYYY-MM-DD-HHMM
+# so you can pin/rollback the router by date (no GitHub Releases needed).
+#   - ghcr.io/<owner>/aihot    (built-in GITHUB_TOKEN; always)
+#   - docker.io/<user>/aihot   (Docker Hub, accelerated by iStoreOS iStoreEnhance)
+#
+# Docker Hub needs repo secret DOCKERHUB_TOKEN; optional var DOCKERHUB_USERNAME (if Hub user != owner).
 name: docker-image
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
-    tags: [ "v*" ]
+  tags: [ "v*" ]
 
 permissions:
   contents: read
@@ -58,13 +58,16 @@ jobs:
         id: tags
         run: |
           owner="${{ github.repository_owner }}"
+          ts="$(date -u +%Y-%m-%d-%H%M)"
           {
             echo "ghcr.io/$owner/aihot:latest"
             echo "ghcr.io/$owner/aihot:${{ github.sha }}"
+            echo "ghcr.io/$owner/aihot:$ts"
             if [ "${{ steps.dhc.outputs.enabled }}" = "true" ]; then
               hub="${{ vars.DOCKERHUB_USERNAME || github.repository_owner }}"
               echo "docker.io/$hub/aihot:latest"
               echo "docker.io/$hub/aihot:${{ github.sha }}"
+              echo "docker.io/$hub/aihot:$ts"
             fi
           } > taglist.txt
           echo "tags<<EOF" >> "$GITHUB_OUTPUT"
